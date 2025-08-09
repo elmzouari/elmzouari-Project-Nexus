@@ -51,7 +51,11 @@ export default function PollComments({ pollId }: { pollId: string }) {
         const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null
         const res = await fetch(
           `/api/polls/comments?pollId=${encodeURIComponent(pollId)}&offset=${offset}&limit=${PAGE_SIZE}&sort=${sort}`,
-          { cache: "no-store", headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } },
+          {
+            cache: "no-store",
+            headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            credentials: "include",
+          },
         )
         const data = await res.json()
         if (res.ok) {
@@ -74,6 +78,7 @@ export default function PollComments({ pollId }: { pollId: string }) {
         const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null
         const res = await fetch(`/api/polls/has-voted?pollId=${encodeURIComponent(pollId)}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: "include",
         })
         const data = await res.json()
         setHasVoted(Boolean(data.hasVoted))
@@ -135,6 +140,7 @@ export default function PollComments({ pollId }: { pollId: string }) {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        credentials: "include",
         body: JSON.stringify({ commentId: c.id, toggle: true }),
       })
       const data = await res.json()
