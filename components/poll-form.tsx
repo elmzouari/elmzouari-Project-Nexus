@@ -67,6 +67,7 @@ export default function PollForm() {
       const res = await fetch("/api/polls", {
         method: "POST",
         headers,
+        credentials: "include",
         body: JSON.stringify({
           question: question.trim(),
           options: cleanedOptions,
