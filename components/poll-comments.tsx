@@ -11,6 +11,7 @@ import { useSelector } from "react-redux"
 import type { RootState } from "@/lib/store"
 import { timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { safeJson } from "@/lib/safe-json"
 
 type SortMode = "newest" | "most-liked"
 
@@ -57,11 +58,11 @@ export default function PollComments({ pollId }: { pollId: string }) {
             credentials: "include",
           },
         )
-        const data = await res.json()
-        if (res.ok) {
-          if (offset === 0) setComments(data.comments || [])
-          else setComments((prev) => [...prev, ...(data.comments || [])])
-          setTotal(Number(data.total || 0))
+        const data = await safeJson(res)
+        if (res.ok && data) {
+          if (offset === 0) setComments((data as any).comments || [])
+          else setComments((prev) => [...prev, ...(((data as any).comments as any[]) || [])])
+          setTotal(Number((data as any).total || 0))
         }
       } finally {
         setLoading(false)
@@ -80,8 +81,8 @@ export default function PollComments({ pollId }: { pollId: string }) {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           credentials: "include",
         })
-        const data = await res.json()
-        setHasVoted(Boolean(data.hasVoted))
+        const data = await safeJson(res)
+        setHasVoted(Boolean((data as any)?.hasVoted))
       } catch {
         setHasVoted(false)
       }
@@ -107,14 +108,13 @@ export default function PollComments({ pollId }: { pollId: string }) {
         credentials: "include",
         body: JSON.stringify({ pollId, text: body }),
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data?.error || "Failed to post comment")
+      const data = await safeJson(res)
+      if (!res.ok || !data) {
+        setError((data as any)?.error || "Failed to post comment")
         return
       }
-      // Prepend on newest, otherwise refetch for most-liked
       if (sort === "newest") {
-        setComments((prev) => [data.comment as ClientComment, ...prev])
+        setComments((prev) => [(data as any).comment as any, ...prev])
         setTotal((t) => t + 1)
       } else {
         fetchPage(0)
@@ -143,13 +143,13 @@ export default function PollComments({ pollId }: { pollId: string }) {
         credentials: "include",
         body: JSON.stringify({ commentId: c.id, toggle: true }),
       })
-      const data = await res.json()
-      if (!res.ok) {
-        // Revert by refetching first page to keep it simple
+      const data = await safeJson(res)
+      if (!res.ok || !data) {
         fetchPage(0)
       } else {
-        // Align with server counts if different
-        setComments((prev) => prev.map((x) => (x.id === c.id ? { ...x, likedByMe: data.liked, likes: data.likes } : x)))
+        setComments((prev) =>
+          prev.map((x) => (x.id === c.id ? { ...x, likedByMe: (data as any).liked, likes: (data as any).likes } : x)),
+        )
       }
     } finally {
       setLikingId(null)
