@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import AuthInit from "@/components/auth-init" // Inserted import
 
 import { Inter } from "next/font/google"
 import "./globals.css"
@@ -27,6 +28,7 @@ export default function ClientLayout({
       <body className={inter.className}>
         <Provider store={storeRef.current}>
           <NextThemesProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+            <AuthInit /> {/* Inserted AuthInit component */}
             {children}
           </NextThemesProvider>
         </Provider>
