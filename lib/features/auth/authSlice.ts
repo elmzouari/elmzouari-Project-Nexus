@@ -1,4 +1,5 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
+import { safeJson } from "@/lib/safe-json"
 
 export type Role = "admin" | "user"
 export interface AuthUser {
@@ -38,11 +39,14 @@ export const registerUser = createAsyncThunk(
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password }),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || "Registration failed")
-    return { user: data.user as AuthUser, token: data.token as string }
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error((data as any)?.error || `Registration failed (HTTP ${res.status})`)
+    }
+    return { user: (data as any).user as AuthUser, token: (data as any).token as string }
   },
 )
 
@@ -52,11 +56,14 @@ export const loginUser = createAsyncThunk(
     const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password }),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || "Login failed")
-    return { user: data.user as AuthUser, token: data.token as string }
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error((data as any)?.error || `Login failed (HTTP ${res.status})`)
+    }
+    return { user: (data as any).user as AuthUser, token: (data as any).token as string }
   },
 )
 
@@ -71,9 +78,12 @@ export const fetchCurrentUser = createAsyncThunk("auth/me", async () => {
   if (!token) return null as AuthUser | null
   const res = await fetch("/api/auth/me", {
     headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
+    cache: "no-store",
   })
-  const data = await res.json()
-  return (data.user ?? null) as AuthUser | null
+  const data = await safeJson(res)
+  if (!data) return null
+  return ((data as any).user ?? null) as AuthUser | null
 })
 
 const authSlice = createSlice({
