@@ -1,103 +1,143 @@
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
-import { useChartColors } from "@/lib/use-chart-colors"
 import type { Poll } from "@/lib/features/polls/pollsSlice"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { useMemo } from "react"
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  type TooltipProps,
+} from "recharts"
+import { useChartColors } from "@/lib/use-chart-colors"
 
-type ApiPoll = Poll
-
-type Snapshot = {
-  polls: ApiPoll[]
-  lastUpdated: string
+// Format a short x-axis label without mutating original objects
+function shortLabel(s: string, max = 18) {
+  if (!s) return ""
+  return s.length <= max ? s : s.slice(0, max - 1) + "…"
 }
 
-export default function PollsOverviewAnalytics() {
-  const [data, setData] = useState<Snapshot | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+export default function PollsOverviewAnalytics({ polls }: { polls: Poll[] }) {
   const c = useChartColors()
 
-  const fetchNow = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch("/api/polls", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || "Failed to fetch polls")
-      const snapshot: Snapshot = {
-        polls: (json?.polls ?? []) as ApiPoll[],
-        lastUpdated: new Date().toISOString(),
+  const kpis = useMemo(() => {
+    const totalPolls = polls.length
+    let totalVotes = 0
+    let topPoll: Poll | null = null
+    let topPollVotes = -1
+    let recentPoll: Poll | null = null
+
+    for (const p of polls) {
+      const votes = p.options.reduce((s, o) => s + o.votes, 0)
+      totalVotes += votes
+      if (votes > topPollVotes) {
+        topPollVotes = votes
+        topPoll = p
       }
-      setData(snapshot)
-    } catch (e: any) {
-      setError(e?.message || "Failed to load analytics")
-    } finally {
-      setLoading(false)
+      if (!recentPoll || +new Date(p.createdAt) > +new Date(recentPoll.createdAt)) {
+        recentPoll = p
+      }
     }
-  }, [])
 
-  useEffect(() => {
-    fetchNow()
-  }, [fetchNow])
+    const avgVotes = totalPolls > 0 ? Math.round(totalVotes / totalPolls) : 0
+    return { totalPolls, totalVotes, avgVotes, topPoll, recentPoll }
+  }, [polls])
 
-  // Derive metrics without mutating any source objects
-  const { totalPolls, totalVotes, avgVotes, chartData } = useMemo(() => {
-    const polls = data?.polls ?? []
-    const totals = polls.map((p) => ({
-      id: p.id,
-      name: p.question,
-      votes: p.options.reduce((s, o) => s + o.votes, 0),
-    }))
+  // Build chart data immutably
+  const chartData = useMemo(
+    () =>
+      polls.map((p) => ({
+        id: p.id,
+        label: p.question,
+        short: shortLabel(p.question),
+        votes: p.options.reduce((s, o) => s + o.votes, 0),
+      })),
+    [polls],
+  )
 
-    // Non-mutating "short label" for tick formatter
-    const withShort = totals.map((t) => ({
-      ...t,
-      shortLabel: t.name.length > 18 ? t.name.slice(0, 15) + "…" : t.name,
-    }))
-
-    const totalVotesAll = totals.reduce((s, t) => s + t.votes, 0)
-    return {
-      totalPolls: polls.length,
-      totalVotes: totalVotesAll,
-      avgVotes: polls.length > 0 ? Math.round(totalVotesAll / polls.length) : 0,
-      chartData: withShort,
-    }
-  }, [data])
+  // Accessible tooltip (no mutation)
+  function CustomTooltip({ active, payload, label }: TooltipProps<number, string>) {
+    if (!active || !payload?.length) return null
+    const item = payload[0]
+    return (
+      <div
+        className="rounded-md border px-2 py-1 text-xs"
+        style={{ background: c.tooltipBg, borderColor: c.tooltipBorder, color: c.tooltipText }}
+      >
+        <div className="font-medium">{label}</div>
+        <div>{`Total: ${item.value}`}</div>
+      </div>
+    )
+  }
 
   return (
-    <Card className="bg-white dark:bg-[#0b1220]/60 border border-black/5 dark:border-white/10">
-      <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <CardTitle>Polls Overview Analytics (Current Snapshot)</CardTitle>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchNow} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh now"}
-          </Button>
-        </div>
+    <Card className="rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-[#0b1220]/60">
+      <CardHeader>
+        <CardTitle className="text-lg md:text-xl">Polls Overview Analytics (Current Snapshot)</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          This dashboard reads from a single source of truth and uses manual refresh. Percentages in poll cards are
+          relative to total votes within each poll.
+        </p>
       </CardHeader>
-      <CardContent className="space-y-6">
-        {error && (
-          <div className="rounded-md border border-red-300/40 bg-red-100/40 dark:bg-red-900/20 p-3 text-sm">
-            {error}
+      <CardContent className="space-y-4">
+        {/* KPIs */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-md border border-black/5 dark:border-white/10 p-3 text-center">
+            <div className="text-3xl font-semibold">{kpis.totalPolls}</div>
+            <div className="text-xs text-muted-foreground">Total Polls</div>
           </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Stat title="Total Polls" value={totalPolls} />
-          <Stat title="Total Votes" value={totalVotes} />
-          <Stat title="Avg Votes / Poll" value={avgVotes} />
+          <div className="rounded-md border border-black/5 dark:border-white/10 p-3 text-center">
+            <div className="text-3xl font-semibold">{kpis.totalVotes}</div>
+            <div className="text-xs text-muted-foreground">Total Votes</div>
+          </div>
+          <div className="rounded-md border border-black/5 dark:border-white/10 p-3 text-center">
+            <div className="text-3xl font-semibold">{kpis.avgVotes}</div>
+            <div className="text-xs text-muted-foreground">Avg Votes / Poll</div>
+          </div>
         </div>
 
-        <div>
-          <h3 className="text-sm font-medium mb-2">Votes Per Poll</h3>
-          <div className="h-[260px] w-full rounded-md" role="img" aria-label="Bar chart showing total votes per poll">
+        {/* Highlights */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="rounded-md border border-black/5 dark:border-white/10 p-3">
+            <div className="text-xs text-muted-foreground mb-1">Most Popular</div>
+            {kpis.topPoll ? (
+              <>
+                <div className="font-medium">{kpis.topPoll.question}</div>
+                <div className="text-xs text-muted-foreground">
+                  {kpis.topPoll.options.reduce((s, o) => s + o.votes, 0)} votes
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-muted-foreground">No data</div>
+            )}
+          </div>
+          <div className="rounded-md border border-black/5 dark:border-white/10 p-3">
+            <div className="text-xs text-muted-foreground mb-1">Recently Created</div>
+            {kpis.recentPoll ? (
+              <>
+                <div className="font-medium">{kpis.recentPoll.question}</div>
+                <div className="text-xs text-muted-foreground">{new Date(kpis.recentPoll.createdAt).toLocaleString()}</div>
+              </>
+            ) : (
+              <div className="text-sm text-muted-foreground">No data</div>
+            )}
+          </div>
+        </div>
+
+        {/* Votes per poll */}
+        <div className="space-y-2">
+          <div className="text-base font-semibold">Votes Per Poll</div>
+          <div className="h-[260px] w-full rounded-md">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 16 }}>
+              <BarChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 30 }}>
                 <CartesianGrid stroke={c.grid} strokeDasharray="3 3" />
                 <XAxis
-                  dataKey="shortLabel"
+                  dataKey="short"
                   tick={{ fill: c.axis, fontSize: 12 }}
                   axisLine={{ stroke: c.axis }}
                   tickLine={{ stroke: c.axis }}
@@ -108,37 +148,20 @@ export default function PollsOverviewAnalytics() {
                   axisLine={{ stroke: c.axis }}
                   tickLine={{ stroke: c.axis }}
                 />
-                <Tooltip
-                  wrapperStyle={{ outline: "none" }}
-                  contentStyle={{ background: c.tooltipBg, borderColor: c.tooltipBorder, color: c.tooltipText }}
-                  labelStyle={{ color: c.tooltipText }}
-                  itemStyle={{ color: c.tooltipText }}
-                  // Pure formatter: does not modify inputs
-                  formatter={(value: number) => [`${Number(value ?? 0)}`, "Total"]}
-                  labelFormatter={(label: string, payload) => {
-                    // Show full question in tooltip label using the first payload point
-                    const first = payload?.[0]?.payload as { name?: string }
-                    return first?.name ?? label
-                  }}
-                />
-                <Bar dataKey="votes" fill={c.bar} />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar dataKey="votes" name="Total Votes" fill={c.bar} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Updated {data ? new Date(data.lastUpdated).toLocaleTimeString() : "…"}
-          </p>
+          <div className="flex flex-wrap gap-2">
+            {chartData.map((d) => (
+              <Badge key={d.id} variant="outline" className="text-xs">
+                {d.label}
+              </Badge>
+            ))}
+          </div>
         </div>
       </CardContent>
     </Card>
-  )
-}
-
-function Stat({ title, value }: { title: string; value: number | string }) {
-  return (
-    <div className="rounded-lg border border-black/5 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4">
-      <div className="text-3xl font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-muted-foreground mt-1">{title}</div>
-    </div>
   )
 }
