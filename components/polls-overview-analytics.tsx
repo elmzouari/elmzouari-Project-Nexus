@@ -1,236 +1,144 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  PieChart,
-  Pie,
-  Legend,
-} from "recharts"
-import type { Poll } from "@/lib/features/polls/pollsSlice"
+import { useEffect, useMemo, useState, useCallback } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { useChartColors } from "@/lib/use-chart-colors"
-import { ArrowDownRight, ArrowUpRight } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import type { Poll } from "@/lib/features/polls/pollsSlice"
 
-interface PollsOverviewAnalyticsProps {
-  polls: Poll[]
+type ApiPoll = Poll
+
+type Snapshot = {
+  polls: ApiPoll[]
+  lastUpdated: string
 }
 
-function shorten(label: string, max = 20) {
-  if (!label) return ""
-  return label.length > max ? `${label.slice(0, max - 1)}…` : label
-}
-
-export default function PollsOverviewAnalytics({ polls }: PollsOverviewAnalyticsProps) {
-  const totalPolls = polls.length
-  const totalVotesAcrossAllPolls = useMemo(
-    () => polls.reduce((sum, poll) => sum + poll.options.reduce((s, o) => s + o.votes, 0), 0),
-    [polls],
-  )
-  const avgVotesPerPoll = totalPolls > 0 ? Math.round(totalVotesAcrossAllPolls / totalPolls) : 0
-
-  const chartData = useMemo(
-    () =>
-      polls.map((poll) => ({
-        id: poll.id,
-        name: poll.question,
-        short: shorten(poll.question),
-        votes: poll.options.reduce((sum, option) => sum + option.votes, 0),
-      })),
-    [polls],
-  )
-
-  // Trend indicator (compare with last snapshot)
-  const [delta, setDelta] = useState(0)
-  const prev = useRef<number | null>(null)
-  useEffect(() => {
-    const prevStored = typeof window !== "undefined" ? Number(localStorage.getItem("kpi_total_votes") || "0") : 0
-    prev.current = prevStored
-    setDelta(totalVotesAcrossAllPolls - prevStored)
-    if (typeof window !== "undefined") localStorage.setItem("kpi_total_votes", String(totalVotesAcrossAllPolls))
-  }, [totalVotesAcrossAllPolls])
-
-  const mostPopular = useMemo(() => chartData.slice().sort((a, b) => b.votes - a.votes)[0], [chartData])
-  const mostRecent = useMemo(
-    () => polls.slice().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0],
-    [polls],
-  )
-
+export default function PollsOverviewAnalytics() {
+  const [data, setData] = useState<Snapshot | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const c = useChartColors()
 
-  // Color palette per bar
-  const palette = [
-    "#7c6cf5",
-    "#f59e0b",
-    "#10b981",
-    "#22d3ee",
-    "#ef4444",
-    "#e879f9",
-    "#f472b6",
-    "#34d399",
-    "#60a5fa",
-    "#f97316",
-  ]
+  const fetchNow = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/polls", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || "Failed to fetch polls")
+      const snapshot: Snapshot = {
+        polls: (json?.polls ?? []) as ApiPoll[],
+        lastUpdated: new Date().toISOString(),
+      }
+      setData(snapshot)
+    } catch (e: any) {
+      setError(e?.message || "Failed to load analytics")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  // Detailed view (optional pie chart for a single poll)
-  const [detailPollId, setDetailPollId] = useState<string | "none">("none")
-  const detailPoll = useMemo(
-    () => (detailPollId === "none" ? null : polls.find((p) => p.id === detailPollId)),
-    [detailPollId, polls],
-  )
-  const totalVotesForDetail = detailPoll?.options.reduce((s, o) => s + o.votes, 0) ?? 0
+  useEffect(() => {
+    fetchNow()
+  }, [fetchNow])
+
+  // Derive metrics without mutating any source objects
+  const { totalPolls, totalVotes, avgVotes, chartData } = useMemo(() => {
+    const polls = data?.polls ?? []
+    const totals = polls.map((p) => ({
+      id: p.id,
+      name: p.question,
+      votes: p.options.reduce((s, o) => s + o.votes, 0),
+    }))
+
+    // Non-mutating "short label" for tick formatter
+    const withShort = totals.map((t) => ({
+      ...t,
+      shortLabel: t.name.length > 18 ? t.name.slice(0, 15) + "…" : t.name,
+    }))
+
+    const totalVotesAll = totals.reduce((s, t) => s + t.votes, 0)
+    return {
+      totalPolls: polls.length,
+      totalVotes: totalVotesAll,
+      avgVotes: polls.length > 0 ? Math.round(totalVotesAll / polls.length) : 0,
+      chartData: withShort,
+    }
+  }, [data])
 
   return (
-    <Card className="w-full max-w-6xl rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-[#0b1220]/60 shadow-lg">
-      <CardHeader>
-        <CardTitle className="tracking-tight">Polls Overview Analytics (Current Snapshot)</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          This dashboard reads from a single source of truth (/api/polls) and auto-refreshes wherever enabled.
-          Percentages are relative to total votes across all polls.
-        </p>
+    <Card className="bg-white dark:bg-[#0b1220]/60 border border-black/5 dark:border-white/10">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <CardTitle>Polls Overview Analytics (Current Snapshot)</CardTitle>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={fetchNow} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh now"}
+          </Button>
+        </div>
       </CardHeader>
-      <CardContent className="grid gap-6">
-        {/* KPI Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="flex flex-col items-center justify-center p-4 rounded-lg border border-black/5 dark:border-white/10 bg-black/5 dark:bg-white/5">
-            <p className="text-5xl font-bold text-primary">{totalPolls}</p>
-            <p className="text-lg text-muted-foreground">Total Polls</p>
+      <CardContent className="space-y-6">
+        {error && (
+          <div className="rounded-md border border-red-300/40 bg-red-100/40 dark:bg-red-900/20 p-3 text-sm">
+            {error}
           </div>
-          <div className="flex flex-col items-center justify-center p-4 rounded-lg border border-black/5 dark:border-white/10 bg-black/5 dark:bg-white/5">
-            <div className="flex items-center gap-2">
-              <p className="text-5xl font-bold text-primary">{totalVotesAcrossAllPolls}</p>
-              {delta !== 0 ? (
-                delta > 0 ? (
-                  <span className="text-emerald-500 inline-flex items-center text-sm font-medium">
-                    <ArrowUpRight className="h-5 w-5" />+{delta}
-                  </span>
-                ) : (
-                  <span className="text-red-500 inline-flex items-center text-sm font-medium">
-                    <ArrowDownRight className="h-5 w-5" />
-                    {delta}
-                  </span>
-                )
-              ) : null}
-            </div>
-            <p className="text-lg text-muted-foreground">Total Votes</p>
-          </div>
-          <div className="flex flex-col items-center justify-center p-4 rounded-lg border border-black/5 dark:border-white/10 bg-black/5 dark:bg-white/5">
-            <p className="text-5xl font-bold text-primary">{avgVotesPerPoll}</p>
-            <p className="text-lg text-muted-foreground">Avg Votes / Poll</p>
-          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Stat title="Total Polls" value={totalPolls} />
+          <Stat title="Total Votes" value={totalVotes} />
+          <Stat title="Avg Votes / Poll" value={avgVotes} />
         </div>
 
-        {/* Highlights */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="rounded-lg border border-black/5 dark:border-white/10 p-4 bg-black/5 dark:bg-white/5">
-            <p className="text-sm text-muted-foreground">Most Popular</p>
-            <p className="font-medium mt-1">{mostPopular?.name ?? "—"}</p>
-            <p className="text-sm text-muted-foreground">{mostPopular ? `${mostPopular.votes} votes` : ""}</p>
-          </div>
-          <div className="rounded-lg border border-black/5 dark:border-white/10 p-4 bg-black/5 dark:bg-white/5">
-            <p className="text-sm text-muted-foreground">Recently Created</p>
-            <p className="font-medium mt-1">{mostRecent?.question ?? "—"}</p>
-            <p className="text-sm text-muted-foreground">
-              {mostRecent ? new Date(mostRecent.createdAt).toLocaleString() : ""}
-            </p>
-          </div>
-        </div>
-
-        {/* Bar Chart */}
-        <div className="h-[320px] w-full" role="img" aria-label="Bar chart of total votes per poll">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-lg font-semibold">Votes Per Poll</h3>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Detail:</span>
-              <Select value={detailPollId} onValueChange={(v) => setDetailPollId(v as any)}>
-                <SelectTrigger className="h-8 w-[220px]">
-                  <SelectValue placeholder="Select a poll for pie chart" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {polls.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {shorten(p.question, 40)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
-              <CartesianGrid stroke={c.grid} strokeDasharray="3 3" />
-              <XAxis
-                dataKey="short"
-                angle={-30}
-                textAnchor="end"
-                height={70}
-                tick={{ fill: c.axis, fontSize: 12 }}
-                axisLine={{ stroke: c.axis }}
-                tickLine={{ stroke: c.axis }}
-              />
-              <YAxis
-                tick={{ fill: c.axis, fontSize: 12 }}
-                axisLine={{ stroke: c.axis }}
-                tickLine={{ stroke: c.axis }}
-              />
-              <Tooltip
-                wrapperStyle={{ outline: "none" }}
-                contentStyle={{ background: c.tooltipBg, borderColor: c.tooltipBorder, color: c.tooltipText }}
-                labelStyle={{ color: c.tooltipText }}
-                itemStyle={{ color: c.tooltipText }}
-                formatter={(value: number, _name: string, payload: any) => {
-                  const votes = value as number
-                  const pct = totalVotesAcrossAllPolls > 0 ? (votes / totalVotesAcrossAllPolls) * 100 : 0
-                  // show full poll name on hover
-                  payload?.payload && (payload.payload.short = payload.payload.name)
-                  return [`${votes} votes (${pct.toFixed(1)}%)`, "Total"]
-                }}
-              />
-              <Bar dataKey="votes" name="Total Votes">
-                {chartData.map((_e, i) => (
-                  <Cell key={`cell-${i}`} fill={palette[i % palette.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Optional Pie for per-poll proportions */}
-        {detailPoll && (
-          <div className="h-[320px] w-full">
-            <h3 className="text-lg font-semibold mb-2">Option Breakdown: {detailPoll.question}</h3>
+        <div>
+          <h3 className="text-sm font-medium mb-2">Votes Per Poll</h3>
+          <div className="h-[260px] w-full rounded-md" role="img" aria-label="Bar chart showing total votes per poll">
             <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
+              <BarChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 16 }}>
+                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="shortLabel"
+                  tick={{ fill: c.axis, fontSize: 12 }}
+                  axisLine={{ stroke: c.axis }}
+                  tickLine={{ stroke: c.axis }}
+                  interval={0}
+                />
+                <YAxis
+                  tick={{ fill: c.axis, fontSize: 12 }}
+                  axisLine={{ stroke: c.axis }}
+                  tickLine={{ stroke: c.axis }}
+                />
                 <Tooltip
                   wrapperStyle={{ outline: "none" }}
                   contentStyle={{ background: c.tooltipBg, borderColor: c.tooltipBorder, color: c.tooltipText }}
                   labelStyle={{ color: c.tooltipText }}
                   itemStyle={{ color: c.tooltipText }}
-                  formatter={(value: number) => {
-                    const pct = totalVotesForDetail > 0 ? ((value as number) / totalVotesForDetail) * 100 : 0
-                    return [`${value} (${pct.toFixed(1)}%)`, "Votes"]
+                  // Pure formatter: does not modify inputs
+                  formatter={(value: number) => [`${Number(value ?? 0)}`, "Total"]}
+                  labelFormatter={(label: string, payload) => {
+                    // Show full question in tooltip label using the first payload point
+                    const first = payload?.[0]?.payload as { name?: string }
+                    return first?.name ?? label
                   }}
                 />
-                <Legend />
-                <Pie data={detailPoll.options} dataKey="votes" nameKey="text" outerRadius={100} innerRadius={40}>
-                  {detailPoll.options.map((_o, i) => (
-                    <Cell key={i} fill={palette[i % palette.length]} />
-                  ))}
-                </Pie>
-              </PieChart>
+                <Bar dataKey="votes" fill={c.bar} />
+              </BarChart>
             </ResponsiveContainer>
           </div>
-        )}
+          <p className="text-xs text-muted-foreground mt-2">
+            Updated {data ? new Date(data.lastUpdated).toLocaleTimeString() : "…"}
+          </p>
+        </div>
       </CardContent>
     </Card>
+  )
+}
+
+function Stat({ title, value }: { title: string; value: number | string }) {
+  return (
+    <div className="rounded-lg border border-black/5 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4">
+      <div className="text-3xl font-semibold tabular-nums">{value}</div>
+      <div className="text-xs text-muted-foreground mt-1">{title}</div>
+    </div>
   )
 }
