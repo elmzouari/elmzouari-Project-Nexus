@@ -83,6 +83,13 @@ const authSlice = createSlice({
     hydrateToken: (state) => {
       state.token = getStoredToken()
     },
+    setAuthFromRefresh: (state, action: PayloadAction<{ token: string; user: AuthUser }>) => {
+      state.token = action.payload.token
+      state.user = action.payload.user
+      state.status = "succeeded"
+      state.error = null
+      setStoredToken(action.payload.token)
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -128,5 +135,5 @@ const authSlice = createSlice({
   },
 })
 
-export const { hydrateToken } = authSlice.actions
+export const { hydrateToken, setAuthFromRefresh } = authSlice.actions
 export default authSlice.reducer
