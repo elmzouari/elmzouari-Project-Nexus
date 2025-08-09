@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { pickIcon } from "@/components/category-icon"
 import { humanPollTiming } from "@/lib/time"
 import PollComments from "@/components/poll-comments"
+import { safeJson } from "@/lib/safe-json"
 
 interface PollCardProps {
   poll: Poll
@@ -67,14 +68,14 @@ export default function PollCard({ poll, onVote }: PollCardProps) {
           fetch(`/api/polls/has-voted?pollId=${encodeURIComponent(poll.id)}`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
             credentials: "include",
-          }).then((r) => r.json()),
+          }).then((r) => safeJson(r)),
           fetch(`/api/polls/participants?pollId=${encodeURIComponent(poll.id)}`, {
             credentials: "include",
-          }).then((r) => r.json()),
+          }).then((r) => safeJson(r)),
         ])
-        setHasVoted(Boolean(votedRes.hasVoted))
-        setPrevOptionIds(Array.isArray(votedRes.optionIds) ? votedRes.optionIds : [])
-        setParticipants(Number(participantsRes.participants ?? 0))
+        setHasVoted(Boolean((votedRes as any)?.hasVoted))
+        setPrevOptionIds(Array.isArray((votedRes as any)?.optionIds) ? ((votedRes as any).optionIds as string[]) : [])
+        setParticipants(Number((participantsRes as any)?.participants ?? 0))
       } catch {
         // no-op
       }
