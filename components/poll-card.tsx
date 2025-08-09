@@ -66,8 +66,11 @@ export default function PollCard({ poll, onVote }: PollCardProps) {
         const [votedRes, participantsRes] = await Promise.all([
           fetch(`/api/polls/has-voted?pollId=${encodeURIComponent(poll.id)}`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
+            credentials: "include",
           }).then((r) => r.json()),
-          fetch(`/api/polls/participants?pollId=${encodeURIComponent(poll.id)}`).then((r) => r.json()),
+          fetch(`/api/polls/participants?pollId=${encodeURIComponent(poll.id)}`, {
+            credentials: "include",
+          }).then((r) => r.json()),
         ])
         setHasVoted(Boolean(votedRes.hasVoted))
         setPrevOptionIds(Array.isArray(votedRes.optionIds) ? votedRes.optionIds : [])
