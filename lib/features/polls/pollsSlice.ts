@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from "@reduxjs/toolkit"
+import { safeJson } from "@/lib/safe-json"
 
 export interface PollOption {
   id: string
@@ -36,9 +37,11 @@ export const fetchPolls = createAsyncThunk("polls/fetchPolls", async () => {
     cache: "no-store",
     headers: { "Cache-Control": "no-cache" },
   })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data?.error || "Failed to fetch polls")
-  return data.polls as Poll[]
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error((data as any)?.error || `Failed to fetch polls (HTTP ${res.status})`)
+  const polls = (data as any)?.polls
+  if (!Array.isArray(polls)) throw new Error("Failed to fetch polls: invalid response shape")
+  return polls as Poll[]
 })
 
 export const voteOnPoll = createAsyncThunk(
@@ -51,9 +54,9 @@ export const voteOnPoll = createAsyncThunk(
       credentials: "include",
       body: JSON.stringify({ pollId, optionIds, revote }),
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || "Failed to vote on poll")
-    return data.updatedPoll as Poll
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error((data as any)?.error || `Failed to vote on poll (HTTP ${res.status})`)
+    return (data as any).updatedPoll as Poll
   },
 )
 
@@ -74,9 +77,9 @@ export const createNewPoll = createAsyncThunk(
       credentials: "include",
       body: JSON.stringify(newPoll),
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || "Failed to create poll")
-    return data.newPoll as Poll
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error((data as any)?.error || `Failed to create poll (HTTP ${res.status})`)
+    return (data as any).newPoll as Poll
   },
 )
 
