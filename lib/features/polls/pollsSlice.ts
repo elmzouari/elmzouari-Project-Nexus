@@ -1,79 +1,64 @@
-import { createSlice, createAsyncThunk, type PayloadAction } from "@reduxjs/toolkit"
+import { createAsyncThunk, createSlice } from "@reduxjs/toolkit"
 
-export interface PollOption {
-  id: string
-  text: string
-  votes: number
-}
-export interface Poll {
+interface Poll {
   id: string
   question: string
-  options: PollOption[]
+  options: { id: string; text: string }[]
   startDate: string
   endDate: string
-  type: "single-choice" | "multi-select"
-  categories?: string[]
-  createdAt: string
+  type: string
+  categories: string[]
 }
-interface PollsState {
+
+interface PollState {
   polls: Poll[]
   status: "idle" | "loading" | "succeeded" | "failed"
   error: string | null
 }
-const initialState: PollsState = { polls: [], status: "idle", error: null }
 
-function getAuthHeader() {
-  if (typeof window === "undefined") return {}
-  const token = localStorage.getItem("auth_token")
+const initialState: PollState = {
+  polls: [],
+  status: "idle",
+  error: null,
+}
+
+const getAuthHeader = () => {
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 export const fetchPolls = createAsyncThunk("polls/fetchPolls", async () => {
-  const res = await fetch("/api/polls", {
-    cache: "no-store",
-    headers: { "Cache-Control": "no-cache" },
-  })
-  if (!res.ok) throw new Error("Failed to fetch polls")
-  const data = await res.json()
-  return data.polls as Poll[]
+  const response = await fetch("/api/polls")
+  const data = await response.json()
+  return data
 })
 
 export const voteOnPoll = createAsyncThunk(
   "polls/voteOnPoll",
-  async ({ pollId, optionIds, revote }: { pollId: string; optionIds: string[]; revote?: boolean }) => {
+  async ({ pollId, optionIds, revote }: { pollId: string; optionIds: string[]; revote: boolean }) => {
     const res = await fetch("/api/polls/vote", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getAuthHeader(), "Cache-Control": "no-cache" },
       cache: "no-store",
+      credentials: "include",
       body: JSON.stringify({ pollId, optionIds, revote }),
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || "Failed to vote on poll")
-    return data.updatedPoll as Poll
+    const data = await res.json()
+    return data
   },
 )
 
-export const createNewPoll = createAsyncThunk(
-  "polls/createNewPoll",
-  async (newPoll: {
-    question: string
-    options: string[]
-    startDate: string
-    endDate: string
-    type: "single-choice" | "multi-select"
-    categories?: string[]
-  }) => {
-    const res = await fetch("/api/polls", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...getAuthHeader(), "Cache-Control": "no-cache" },
-      cache: "no-store",
-      body: JSON.stringify(newPoll),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || "Failed to create poll")
-    return data.newPoll as Poll
-  },
-)
+export const createNewPoll = createAsyncThunk("polls/createNewPoll", async (newPoll: Poll) => {
+  const res = await fetch("/api/polls", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeader(), "Cache-Control": "no-cache" },
+    cache: "no-store",
+    credentials: "include",
+    body: JSON.stringify(newPoll),
+  })
+  const data = await res.json()
+  return data
+})
 
 const pollsSlice = createSlice({
   name: "polls",
@@ -84,28 +69,35 @@ const pollsSlice = createSlice({
       .addCase(fetchPolls.pending, (state) => {
         state.status = "loading"
       })
-      .addCase(fetchPolls.fulfilled, (state, action: PayloadAction<Poll[]>) => {
+      .addCase(fetchPolls.fulfilled, (state, action) => {
         state.status = "succeeded"
         state.polls = action.payload
       })
       .addCase(fetchPolls.rejected, (state, action) => {
         state.status = "failed"
-        state.error = action.error.message || "Something went wrong"
+        state.error = action.error.message || null
       })
-      .addCase(voteOnPoll.fulfilled, (state, action: PayloadAction<Poll>) => {
-        const idx = state.polls.findIndex((p) => p.id === action.payload.id)
-        if (idx !== -1) state.polls[idx] = action.payload
+      .addCase(voteOnPoll.pending, (state) => {
+        state.status = "loading"
+      })
+      .addCase(voteOnPoll.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        // Handle poll vote update here
       })
       .addCase(voteOnPoll.rejected, (state, action) => {
         state.status = "failed"
-        state.error = action.error.message || "Failed to cast vote"
+        state.error = action.error.message || null
       })
-      .addCase(createNewPoll.fulfilled, (state, action: PayloadAction<Poll>) => {
+      .addCase(createNewPoll.pending, (state) => {
+        state.status = "loading"
+      })
+      .addCase(createNewPoll.fulfilled, (state, action) => {
+        state.status = "succeeded"
         state.polls.push(action.payload)
       })
       .addCase(createNewPoll.rejected, (state, action) => {
         state.status = "failed"
-        state.error = action.error.message || "Failed to create poll"
+        state.error = action.error.message || null
       })
   },
 })
