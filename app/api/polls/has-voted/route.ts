@@ -7,8 +7,11 @@ export async function GET(req: Request) {
   const pollId = url.searchParams.get("pollId")
   if (!pollId) return NextResponse.json({ error: "pollId required" }, { status: 400 })
 
-  const poll = getPollById(pollId)
-  if (!poll) return NextResponse.json({ error: "Poll not found" }, { status: 404 })
+  const poll = await getPollById(pollId)
+  if (!poll) {
+    // Safe default so the UI can render without network errors while lists are syncing.
+    return NextResponse.json({ hasVoted: false, optionIds: [] })
+  }
 
   const user = getCurrentUserFromRequest(req)
   if (!user) {
@@ -20,3 +23,4 @@ export async function GET(req: Request) {
   const optionIds = getUserVoteOptions(pollId, user.id) ?? []
   return NextResponse.json({ hasVoted: voted, optionIds })
 }
+
