@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from "@reduxjs/toolkit"
 import { safeJson } from "@/lib/safe-json"
+import { resetAuth } from "@/lib/features/auth/authSlice"
 
 export interface PollOption {
   id: string
@@ -67,8 +68,7 @@ export const fetchPolls = createAsyncThunk("polls/fetchPolls", async () => {
 
 export const voteOnPoll = createAsyncThunk(
   "polls/voteOnPoll",
-  async ({ pollId, optionIds, revote }: { pollId: string; optionIds: string[]; revote?: boolean }) => {
-    // Inner function to execute the POST with current token
+  async ({ pollId, optionIds, revote }: { pollId: string; optionIds: string[]; revote?: boolean }, thunkAPI) => {
     const doPost = async () => {
       const res = await fetch("/api/polls/vote", {
         method: "POST",
@@ -81,14 +81,19 @@ export const voteOnPoll = createAsyncThunk(
       return { res, data }
     }
 
-    // First attempt
     let { res, data } = await doPost()
 
-    // If unauthorized, try to refresh token from session cookie and retry once
     if (res.status === 401) {
       const token = await refreshToken()
       if (token) {
         ;({ res, data } = await doPost())
+      }
+      if (res.status === 401) {
+        // Clear stale client auth so UI shows Sign in
+        try {
+          // @ts-ignore dispatch is available on thunkAPI
+          thunkAPI.dispatch(resetAuth())
+        } catch {}
       }
     }
 
