@@ -1,0 +1,145 @@
+/// components/auth-dialog.tsx
+import React, { useEffect, useState } from 'react';
+import { useDispatch } from 'react-redux';
+import { setAuthFromRefresh } from '@/lib/features/auth/authSlice';
+
+const AuthDialog = () => {
+  const [open, setOpen] = useState(false);
+  const dispatch = useDispatch();
+
+  useEffect(() => {
+    const onPrompt = () => setOpen(true);
+    if (typeof window !== "undefined") {
+      window.addEventListener("auth:prompt", onPrompt as EventListener);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("auth:prompt", onPrompt as EventListener);
+      }
+    };
+  }, []);
+
+  // ** rest of code here **/
+
+  return (
+    <div>
+      {open && (
+        <div>
+          {/* Dialog content */}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AuthDialog;
+
+// components/auth-init.tsx
+import React, { useEffect } from 'react';
+import { useDispatch } from 'react-redux';
+import { setAuthFromRefresh } from '@/lib/features/auth/authSlice';
+
+const AuthInit = ({ tokenInStore }) => {
+  const dispatch = useDispatch();
+
+  useEffect(() => {
+    const lsToken = typeof window === "undefined" ? null : localStorage.getItem("auth_token");
+    if (lsToken || tokenInStore) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/refresh", { credentials: "include", cache: "no-store" });
+        if (!res.ok) {
+          // No active session cookie - prompt to sign in
+          if (res.status === 401 && typeof window !== "undefined") {
+            window.dispatchEvent(new Event("auth:prompt"));
+          }
+          return;
+        }
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.token && data?.user) {
+          dispatch(setAuthFromRefresh({ token: data.token, user: data.user }));
+        }
+      } catch {
+        // If refresh request itself fails, prompt sign in
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("auth:prompt"));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, tokenInStore]);
+
+  // ** rest of code here **/
+
+  return <div>Auth Init Component</div>;
+};
+
+export default AuthInit;
+
+// lib/features/polls/pollsSlice.ts
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
+import { resetAuth } from '@/lib/features/auth/authSlice';
+
+const pollsSlice = createSlice({
+  name: 'polls',
+  initialState: {
+    polls: [],
+    loading: false,
+    error: null,
+  },
+  reducers: {
+    // ** rest of code here **/
+  },
+  extraReducers: (builder) => {
+    builder.addCase(voteOnPoll.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(voteOnPoll.fulfilled, (state, action) => {
+      state.loading = false;
+      state.polls = action.payload;
+    });
+    builder.addCase(voteOnPoll.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.error.message;
+    });
+  },
+});
+
+export const voteOnPoll = createAsyncThunk(
+  'polls/voteOnPoll',
+  async ({ pollId, option }, thunkAPI) => {
+    const response = await fetch(`/api/polls/${pollId}/vote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ option }),
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        try {
+          // @ts-ignore: dispatch is available
+          thunkAPI.dispatch(resetAuth());
+        } catch {}
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("auth:prompt"));
+        }
+      }
+      throw new Error('Failed to vote on poll');
+    }
+
+    const data = await response.json();
+    return data.polls;
+  }
+);
+
+export default pollsSlice.reducer;
