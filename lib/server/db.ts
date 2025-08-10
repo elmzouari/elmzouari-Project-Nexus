@@ -169,7 +169,6 @@ export const cookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,
   path: "/",
-  // Ensures cookies are sent over HTTPS in production previews/prod
   secure: process.env.NODE_ENV === "production",
 }
 
