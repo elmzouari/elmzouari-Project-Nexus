@@ -26,10 +26,31 @@ interface PollsState {
 
 const initialState: PollsState = { polls: [], status: "idle", error: null }
 
+function getToken() {
+  if (typeof window === "undefined") return null
+  return localStorage.getItem("auth_token")
+}
+function setToken(token: string | null) {
+  if (typeof window === "undefined") return
+  if (token) localStorage.setItem("auth_token", token)
+  else localStorage.removeItem("auth_token")
+}
 function getAuthHeader() {
-  if (typeof window === "undefined") return {}
-  const token = localStorage.getItem("auth_token")
+  const token = getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+async function refreshToken(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/auth/refresh", { credentials: "include", cache: "no-store" })
+    const data = await safeJson(res)
+    if (!res.ok || !data) return null
+    const token = (data as any).token as string | undefined
+    if (token) setToken(token)
+    return token ?? null
+  } catch {
+    return null
+  }
 }
 
 export const fetchPolls = createAsyncThunk("polls/fetchPolls", async () => {
@@ -47,14 +68,30 @@ export const fetchPolls = createAsyncThunk("polls/fetchPolls", async () => {
 export const voteOnPoll = createAsyncThunk(
   "polls/voteOnPoll",
   async ({ pollId, optionIds, revote }: { pollId: string; optionIds: string[]; revote?: boolean }) => {
-    const res = await fetch("/api/polls/vote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...getAuthHeader(), "Cache-Control": "no-cache" },
-      cache: "no-store",
-      credentials: "include",
-      body: JSON.stringify({ pollId, optionIds, revote }),
-    })
-    const data = await safeJson(res)
+    // Inner function to execute the POST with current token
+    const doPost = async () => {
+      const res = await fetch("/api/polls/vote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader(), "Cache-Control": "no-cache" },
+        cache: "no-store",
+        credentials: "include",
+        body: JSON.stringify({ pollId, optionIds, revote }),
+      })
+      const data = await safeJson(res)
+      return { res, data }
+    }
+
+    // First attempt
+    let { res, data } = await doPost()
+
+    // If unauthorized, try to refresh token from session cookie and retry once
+    if (res.status === 401) {
+      const token = await refreshToken()
+      if (token) {
+        ;({ res, data } = await doPost())
+      }
+    }
+
     if (!res.ok) throw new Error((data as any)?.error || `Failed to vote on poll (HTTP ${res.status})`)
     return (data as any).updatedPoll as Poll
   },
