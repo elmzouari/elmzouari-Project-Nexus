@@ -36,14 +36,14 @@ function setStoredToken(token: string | null) {
 export const registerUser = createAsyncThunk(
   "auth/register",
   async ({ email, password }: { email: string; password: string }) => {
-    const res = await fetch("/api/auth/register", {
+    const res = await fetch("/api/auth/upsert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ email, password }),
     })
     const data = await safeJson(res)
-    if (!res.ok) {
+    if (!res.ok || !data) {
       throw new Error((data as any)?.error || `Registration failed (HTTP ${res.status})`)
     }
     return { user: (data as any).user as AuthUser, token: (data as any).token as string }
@@ -60,9 +60,7 @@ export const loginUser = createAsyncThunk(
       body: JSON.stringify({ email, password }),
     })
     const data = await safeJson(res)
-    if (!res.ok) {
-      throw new Error((data as any)?.error || `Login failed (HTTP ${res.status})`)
-    }
+    if (!res.ok || !data) throw new Error((data as any)?.error || `Login failed (HTTP ${res.status})`)
     return { user: (data as any).user as AuthUser, token: (data as any).token as string }
   },
 )
@@ -82,8 +80,7 @@ export const fetchCurrentUser = createAsyncThunk("auth/me", async () => {
     cache: "no-store",
   })
   const data = await safeJson(res)
-  if (!data) return null
-  return ((data as any).user ?? null) as AuthUser | null
+  return (data as any)?.user ?? null
 })
 
 const authSlice = createSlice({
@@ -140,7 +137,6 @@ const authSlice = createSlice({
       })
       .addCase(fetchCurrentUser.fulfilled, (state, action: PayloadAction<AuthUser | null>) => {
         state.user = action.payload
-        // keep token from storage; hydrate is separate
       })
   },
 })
