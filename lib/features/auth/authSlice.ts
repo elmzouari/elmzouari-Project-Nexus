@@ -1,3 +1,4 @@
+
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import { safeJson } from "@/lib/safe-json"
 
@@ -97,6 +98,13 @@ const authSlice = createSlice({
       state.error = null
       setStoredToken(action.payload.token)
     },
+    resetAuth: (state) => {
+      state.user = null
+      state.token = null
+      state.status = "idle"
+      state.error = null
+      if (typeof window !== "undefined") localStorage.removeItem("auth_token")
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -141,5 +149,5 @@ const authSlice = createSlice({
   },
 })
 
-export const { hydrateToken, setAuthFromRefresh } = authSlice.actions
+export const { hydrateToken, setAuthFromRefresh, resetAuth } = authSlice.actions
 export default authSlice.reducer
