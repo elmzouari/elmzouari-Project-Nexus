@@ -1,40 +1,52 @@
-"use client"
+import { NextResponse } from "next/server"
+import { authenticate, mintSessionToken, setSessionCookie } from "@/lib/server/auth"
+import { createUser, findUserByEmail } from "@/lib/server/db"
 
-import { useEffect } from "react"
-import { useDispatch, useSelector } from "react-redux"
-import type { AppDispatch, RootState } from "@/lib/store"
-import { setAuthFromRefresh } from "@/lib/features/auth/authSlice"
-
-// Hydrates auth from a server session cookie by minting a fresh bearer token
-// if localStorage lacks one (e.g., after reload).
-export default function AuthInit() {
-  const dispatch = useDispatch<AppDispatch>()
-  const tokenInStore = useSelector((s: RootState) => s.auth.token)
-
-  useEffect(() => {
-    // If we already have a token in localStorage or store, skip
-    const lsToken = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null
-    if (lsToken || tokenInStore) return
-
-    let aborted = false
-    ;(async () => {
-      try {
-        const res = await fetch("/api/auth/refresh", { credentials: "include", cache: "no-store" })
-        if (!res.ok) return
-        const data = await res.json()
-        if (aborted) return
-        if (data?.token && data?.user) {
-          dispatch(setAuthFromRefresh({ token: data.token, user: data.user }))
-        }
-      } catch {
-        // ignore
-      }
-    })()
-
-    return () => {
-      aborted = true
+// Demo "upsert" auth:
+// - If the user exists and the password is correct, returns a session (login).
+// - If the user does not exist, creates the user then returns a session (register).
+// - If the user exists but password is wrong, returns 409.
+export async function POST(req: Request) {
+  try {
+    const { email, password } = await req.json()
+    if (!email || !password) {
+      return NextResponse.json({ error: "Email and password are required" }, { status: 400 })
     }
-  }, [dispatch, tokenInStore])
 
-  return null
+    const existing = findUserByEmail(email)
+    if (existing) {
+      const user = authenticate(email, password)
+      if (!user) {
+        return NextResponse.json({ error: "Account exists, but the password is incorrect." }, { status: 409 })
+      }
+      const token = mintSessionToken(user.id)
+      setSessionCookie(token)
+      return NextResponse.json({
+        token,
+        user: { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt },
+        mode: "login",
+      })
+    }
+
+    // Create new user
+    const user = createUser(email, password, "user")
+    const token = mintSessionToken(user.id)
+    setSessionCookie(token)
+    return NextResponse.json(
+      {
+        token,
+        user: { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt },
+        mode: "register",
+      },
+      { status: 201 },
+    )
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || "Upsert failed" }, { status: 500 })
+  }
 }
+
+// Handle potential preflight/OPTIONS gracefully (useful if a proxy issues it)
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204 })
+}
+
